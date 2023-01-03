@@ -1,4 +1,4 @@
-version: '3.4'
+version: '3.9'
 services:
   netbox: &netbox
     image: netboxcommunity/netbox:${VERSION-v3.4-2.4.0}
@@ -6,51 +6,54 @@ services:
     - postgres
     - redis
     - redis-cache
+    - netbox-worker
     env_file: env/netbox.env
     user: 'unit:root'
-    healthcheck:
-      start_period: 60s
-      timeout: 3s
-      interval: 15s
-      test: "curl -f http://localhost:8080/api/ || exit 1"
     volumes:
     - ./configuration:/etc/netbox/config:z,ro
     - ./reports:/etc/netbox/reports:z,ro
     - ./scripts:/etc/netbox/scripts:z,ro
-    - netbox-media-files:/opt/netbox/netbox/media:z
+#    - netbox-media-files:/opt/netbox/netbox/media:z
+    - type: bind
+      source: /mnt/nfs/docker-apps-data/netbox/netbox-server/netbox-data
+      target: /opt/netbox/netbox/media:z
+    ports:
+      - 8080:8080
+    networks:
+      - dock-overlay-net
+
   netbox-worker:
     <<: *netbox
     depends_on:
-      netbox:
-        condition: service_healthy
+    - redis
+    - postgres
     command:
     - /opt/netbox/venv/bin/python
     - /opt/netbox/netbox/manage.py
     - rqworker
-    healthcheck:
-      start_period: 20s
-      timeout: 3s
-      interval: 15s
-      test: "ps -aux | grep -v grep | grep -q rqworker || exit 1"
+    networks:
+      - dock-overlay-net
   netbox-housekeeping:
     <<: *netbox
     depends_on:
-      netbox:
-        condition: service_healthy
+    - redis
+    - postgres
     command:
     - /opt/netbox/housekeeping.sh
-    healthcheck:
-      start_period: 20s
-      timeout: 3s
-      interval: 15s
-      test: "ps -aux | grep -v grep | grep -q housekeeping || exit 1"
+    networks:
+      - dock-overlay-net
 
   # postgres
   postgres:
-    image: postgres:15-alpine
+    image: postgres:14-alpine
     env_file: env/postgres.env
     volumes:
-    - netbox-postgres-data:/var/lib/postgresql/data
+#    - netbox-postgres-data:/var/lib/postgresql/data
+    - type: bind
+      source: /mnt/nfs/docker-apps-data/netbox/netbox-postgres/postgres-data
+      target: /var/lib/postgresql/data
+    networks:
+      - dock-overlay-net
 
   # redis
   redis:
@@ -61,7 +64,12 @@ services:
     - redis-server --appendonly yes --requirepass $$REDIS_PASSWORD ## $$ because of docker-compose
     env_file: env/redis.env
     volumes:
-    - netbox-redis-data:/data
+#    - netbox-redis-data:/data
+    - type: bind
+      source: /mnt/nfs/docker-apps-data/netbox/netbox-redis/redis-data
+      target: /data
+    networks:
+      - dock-overlay-net
   redis-cache:
     image: redis:7-alpine
     command:
@@ -70,14 +78,24 @@ services:
     - redis-server --requirepass $$REDIS_PASSWORD ## $$ because of docker-compose
     env_file: env/redis-cache.env
     volumes:
-    - netbox-redis-cache-data:/data
+#    - netbox-redis-cache-data:/data
+    - type: bind
+      source: /mnt/nfs/docker-apps-data/netbox/netbox-redis/redis-cache
+      target: /data
+    networks:
+      - dock-overlay-net
 
-volumes:
-  netbox-media-files:
-    driver: local
-  netbox-postgres-data:
-    driver: local
-  netbox-redis-data:
-    driver: local
-  netbox-redis-cache-data:
-    driver: local
+networks:
+  dock-overlay-net:
+    name: dock-overlay-net
+    external: true
+
+#volumes:
+#  netbox-media-files:
+#    driver: local
+#  netbox-postgres-data:
+#    driver: local
+#  netbox-redis-data:
+#    driver: local
+#  netbox-redis-cache-data:
+#    driver: local    
